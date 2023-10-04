@@ -512,6 +512,7 @@ def get_metacells(
         common: bool = True, seed: int = 0,
         agg_kws: Optional[List[Kws]] = None
 ) -> List[AnnData]:
+    print('get_metacells')
     r"""
     Aggregate datasets into metacells
 

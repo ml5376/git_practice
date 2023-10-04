@@ -62,6 +62,62 @@ class GraphDecoder(glue.GraphDecoder):
         logits = esgn * (v[sidx] * v[tidx]).sum(dim=1)
         return D.Bernoulli(logits=logits)
 
+class SeqDataEncoder(glue.DataEncoder):
+    def __init__(
+            self, in_features: int, out_features: int,
+            h_depth: int = 2, h_dim: int = 256,
+            dropout: float = 0.2
+    ) -> None:
+        super().__init__()
+        chrom_len=1000
+        self.h_depth = h_depth
+        ptr_dim = in_features
+        for layer in range(self.h_depth):
+            in_dim = chrom_len - (layer + 1) * 4
+            # setattr(self, f"linear_{layer}", torch.nn.Linear(ptr_dim, h_dim))
+            setattr(self, f"linear_{layer}", torch.nn.Sequential(
+                torch.nn.Conv1d(4, 4, kernel_size=2), torch.nn.Sigmoid(),
+                torch.nn.AvgPool1d(kernel_size=2, stride=1),  # 使最后一位减一
+                torch.nn.Conv1d(4, 4, kernel_size=2), torch.nn.Sigmoid(),  # C_out change the middle
+                torch.nn.AvgPool1d(kernel_size=2, stride=1),
+            ))
+            setattr(self, f"act_{layer}", torch.nn.LeakyReLU(negative_slope=0.2))
+            setattr(self, f"bn_{layer}", torch.nn.BatchNorm1d(4))#replace h_dim to 4
+            setattr(self, f"dropout_{layer}", torch.nn.Dropout(p=dropout))
+            ptr_dim = h_dim
+        self.loc = torch.nn.Sequential(torch.nn.Conv1d(4, 1, kernel_size=2), torch.nn.Sigmoid(),
+                torch.nn.Flatten(),torch.nn.Linear(in_dim-1, ptr_dim), torch.nn.Sigmoid(),torch.nn.Linear(ptr_dim, out_features))
+        self.std_lin = torch.nn.Sequential(torch.nn.Conv1d(4, 1, kernel_size=2), torch.nn.Sigmoid(),
+                torch.nn.Flatten(),torch.nn.Linear(in_dim-1, ptr_dim), torch.nn.Sigmoid(),torch.nn.Linear(ptr_dim, out_features))
+    def compute_l(self, x: torch.Tensor) -> torch.Tensor:
+        return x.sum(dim=1, keepdim=True)
+
+    def normalize(
+            self, x: torch.Tensor, l: torch.Tensor
+    ) -> torch.Tensor:
+        return (x * (self.TOTAL_COUNT / l)).log1p()
+    def forward(  # pylint: disable=arguments-differ
+            self, x: torch.Tensor, xrep: torch.Tensor,
+            lazy_normalizer: bool = True
+    ) -> Tuple[D.Normal, Optional[torch.Tensor]]:
+        # print('seq data encoder',x.shape,xrep.shape)#128,4,1000
+        if xrep.numel():
+            l = None if lazy_normalizer else self.compute_l(x)
+            ptr = xrep
+        else:
+            ptr = x
+            l = self.compute_l(x)
+            # ptr = self.normalize(x, l)
+        for layer in range(self.h_depth):
+            ptr = getattr(self, f"linear_{layer}")(ptr)
+            ptr = getattr(self, f"act_{layer}")(ptr)
+            ptr = getattr(self, f"bn_{layer}")(ptr)
+            ptr = getattr(self, f"dropout_{layer}")(ptr)
+        loc = self.loc(ptr)
+        std = F.softplus(self.std_lin(ptr)) + EPS
+        return D.Normal(loc, std), l
+
+
 
 class DataEncoder(glue.DataEncoder):
 
@@ -167,12 +223,15 @@ class DataEncoder(glue.DataEncoder):
         If xrep is empty, the normalized `x` will be used as input
         to the encoder neural network, otherwise xrep is used instead.
         """
+        # print('data encoder-x',x.shape)#128,800
         if xrep.numel():
             l = None if lazy_normalizer else self.compute_l(x)
             ptr = xrep
         else:
             l = self.compute_l(x)
             ptr = self.normalize(x, l)
+
+        # print('ptr',x)
         for layer in range(self.h_depth):
             ptr = getattr(self, f"linear_{layer}")(ptr)
             ptr = getattr(self, f"act_{layer}")(ptr)
@@ -391,12 +450,18 @@ class NBDataDecoder(DataDecoder):
 
     def forward(
             self, u: torch.Tensor, v: torch.Tensor,
-            b: torch.Tensor, l: torch.Tensor
+            b: torch.Tensor, l: torch.Tensor,k
     ) -> D.NegativeBinomial:
         scale = F.softplus(self.scale_lin[b])
         logit_mu = scale * (u @ v.t()) + self.bias[b]
+        print('logit_mu shape',logit_mu.shape)
+        if k=='atac':
+            l=torch.ones(l.shape[0],1)
         mu = F.softmax(logit_mu, dim=1) * l
+        if k=='atac':
+            mu = F.softmax(logit_mu, dim=1)
         log_theta = self.log_theta[b]
+        print('mu shape',mu.shape)
         return D.NegativeBinomial(
             log_theta.exp(),
             logits=(mu + EPS).log() - log_theta

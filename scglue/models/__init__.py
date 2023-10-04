@@ -72,6 +72,7 @@ def configure_dataset(
         )
     data_config = {}
     data_config["prob_model"] = prob_model
+    # print(adata.var)
     if use_highly_variable:
         if "highly_variable" not in adata.var:
             raise ValueError("Please mark highly variable features first!")
@@ -203,12 +204,14 @@ def fit_SCGLUE(
 
     pretrain = model(adatas, sorted(graph.nodes), **pretrain_init_kws)
     pretrain.compile(**compile_kws)
-    pretrain.fit(adatas, graph, **pretrain_fit_kws)
+    print('pretrain.fit---------------------')
+    pretrain.fit(adatas, graph, **pretrain_fit_kws)#SCGLUEModel.fit
     if "directory" in pretrain_fit_kws:
         pretrain.save(os.path.join(pretrain_fit_kws["directory"], "pretrain.dill"))
 
     fit_SCGLUE.logger.info("Estimating balancing weight...")
     for k, adata in adatas.items():
+        print('pretrain.encode_data')
         adata.obsm[f"X_{config.TMP_PREFIX}"] = pretrain.encode_data(k, adata)
     if init_kws.get("shared_batches"):
         use_batch = set(

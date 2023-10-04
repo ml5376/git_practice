@@ -12,7 +12,8 @@ import signal
 import uuid
 from math import ceil
 from typing import Any, List, Mapping, Optional, Tuple
-
+import bindome
+import random
 import h5py
 import networkx as nx
 import numpy as np
@@ -232,6 +233,7 @@ class ArrayDataset(Dataset):
             index * self.getitem_size,
             min((index + 1) * self.getitem_size, self.size)
         )
+        print('get array')
         return [
             torch.as_tensor(a[self.shuffle_idx[i][np.mod(index, self.sizes[i])]].toarray())
             if scipy.sparse.issparse(a) or isinstance(a, SparseDataset)
@@ -309,6 +311,7 @@ class AnnDataset(Dataset):
             self, adatas: List[AnnData], data_configs: List[DATA_CONFIG],
             mode: str = "train", getitem_size: int = 1
     ) -> None:
+        # print('adatas: List[AnnData]',adatas,len(adatas))
         super().__init__(getitem_size=getitem_size)
         if mode not in ("train", "eval"):
             raise ValueError("Invalid `mode`!")
@@ -377,25 +380,71 @@ class AnnDataset(Dataset):
             index * self.getitem_size,
             min((index + 1) * self.getitem_size, self.size)
         )
+        # print('index',index)
+        # print('s',s)
+        # print('self-size',self.size,self.sizes,self.view_idx.shape,self.data_idx[1].shape,self.data_idx[0].shape)
         shuffle_idx = self.shuffle_idx[s].T
         shuffle_pmsk = self.shuffle_pmsk[s]
+        # print('shuffle_idx',shuffle_idx)
+        # print('shuffle_pmsk',shuffle_pmsk)
         items = [
             torch.as_tensor(self._index_array(data, idx))
             for extracted_data in self.extracted_data
             for idx, data in zip(shuffle_idx, extracted_data)
         ]
         items.append(torch.as_tensor(shuffle_pmsk))
+        # print('items',items)
         return items
+#---------------change ------------------------
+    def _convert2sequence(self,atac):
+        print('original atac before conversion',atac)
+        path='/Users/meiqiliu/PycharmProjects/GLUE3/experiments/Atlas/scripts/mm10.fa'
+        seq2 = bindome.tl.get_sequences_from_bed(atac.var[['chrom', 'chromStart', 'chromEnd']].head(1000),
+                                                 genome='mm10', uppercase=True, gen_path=path)
+        #['chrom name': seq] format
+        print("length of seq2:",len(seq2))
+        seq_dict = {}
+        for i in range(len(seq2)):
+            seq_dict[i] = seq2[i][1]
+        # need to pad the sequence in order to have the same length
+        atac_seq = self.onehot_mononuc_multi(seq_dict, 1000)
+        print("convert sequence",atac_seq.shape)
+        self.atac_seq = atac_seq
+        return atac_seq
+
+    def onehot_mononuc_multi(self, seqs, max_length):
+        result = np.full([len(seqs), 4, max_length], 0.25, dtype=np.float32)
+        for i, seq in seqs.items():
+            shift = (max_length - len(seq))
+            # shift = int((max_length - len(seq)) / 2)
+            for j in range(len(seq)):
+                base = seq[j]
+                if base == "A":
+                    result[i, :, j + shift] = [1, 0, 0, 0]
+                elif base == "C":
+                    result[i, :, j + shift] = [0, 1, 0, 0]
+                elif base == "G":
+                    result[i, :, j + shift] = [0, 0, 1, 0]
+                elif base == "T":
+                    result[i, :, j + shift] = [0, 0, 0, 1]
+        return result
 
     @staticmethod
     def _index_array(arr: AnyArray, idx: np.ndarray) -> np.ndarray:
+        # print('arr',arr,arr.shape)
+        # print('idx', idx)
         if isinstance(arr, (h5py.Dataset, SparseDataset)):
             rank = scipy.stats.rankdata(idx, method="dense") - 1
             sorted_idx = np.empty(rank.max() + 1, dtype=int)
             sorted_idx[rank] = idx
-            arr = arr[sorted_idx.tolist()][rank.tolist()]  # Convert to sequantial access and back
+            arr = arr[sorted_idx.tolist()][rank.tolist()]
+            # Convert to sequantial access and back
         else:
             arr = arr[idx]
+            # if (idx<=arr.shape[0]).all():
+            #     arr = arr[idx]
+            #     print("out of bound", arr.shape)
+        # print(arr.shape)
         return arr.toarray() if scipy.sparse.issparse(arr) else arr
 
     def _extract_data(self, data_configs: List[DATA_CONFIG]) -> Tuple[
@@ -469,37 +518,66 @@ class AnnDataset(Dataset):
             for adata in self.adatas
         ]
         return xuid, (x, xrep, xbch, xlbl, xdwt)
-
+#----------------------change in extract_x------------------------------
     def _extract_x(self, adata: AnnData, data_config: DATA_CONFIG) -> AnyArray:
         default_dtype = get_default_numpy_dtype()
         features = data_config["features"]
         use_layer = data_config["use_layer"]
-        if not np.array_equal(adata.var_names, features):
-            adata = adata[:, features]  # This will load all data to memory if backed
-        if use_layer:
-            if use_layer not in adata.layers:
-                raise ValueError(
-                    f"Configured data layer '{use_layer}' "
-                    f"cannot be found in input data!"
-                )
-            x = adata.layers[use_layer]
+        # if not np.array_equal(adata.var_names, features):
+        #     adata = adata[:, features]  # This will load all data to memory if backed
+        # print('data feature',adata)
+        # if use_layer:#true or false
+        #     if use_layer not in adata.layers:
+        #         raise ValueError(
+        #             f"Configured data layer '{use_layer}' "
+        #             f"cannot be found in input data!"
+        #         )
+        #     x = adata.layers[use_layer]
+        # else:
+        #     x=adata.X
+
+        # if data_config['prob_model'] == "NB_seq":
+        if adata.obsm == 'X_lsi':
+            # if not np.array_equal(adata.var_names, features):
+            #     adata = adata[:, features]
+            x = self._convert2sequence(adata)
+            print("atac data",x.shape) #1000,4,1000
+            # print(adata)
+            adata1 = adata[:, features].copy()
+            # print('adata feature',adata)
         else:
-            x = adata.X
-        if x.dtype.type is not default_dtype:
-            if isinstance(x, (h5py.Dataset, SparseDataset)):
-                raise RuntimeError(
-                    f"User is responsible for ensuring a {default_dtype} dtype "
-                    f"when using backed data!"
-                )
-            x = x.astype(default_dtype)
-        if scipy.sparse.issparse(x):
-            x = x.tocsr()
+            if not np.array_equal(adata.var_names, features):
+                adata1 = adata[:, features].copy()  # This will load all data to memory if backed
+                # print('data feature',adata)
+            if use_layer:#true or false
+                if use_layer not in adata1.layers:
+                    raise ValueError(
+                        f"Configured data layer '{use_layer}' "
+                        f"cannot be found in input data!"
+                    )
+                x = adata1.layers[use_layer]
+            else:
+                x = adata1.X
+
+            print("rna data", x.shape)#1000,800
+
+            if x.dtype.type is not default_dtype:
+                if isinstance(x, (h5py.Dataset, SparseDataset)):
+                    raise RuntimeError(
+                        f"User is responsible for ensuring a {default_dtype} dtype "
+                        f"when using backed data!"
+                    )
+                x = x.astype(default_dtype)
+            if scipy.sparse.issparse(x):
+                x = x.tocsr()
         return x
 
     def _extract_xrep(self, adata: AnnData, data_config: DATA_CONFIG) -> AnyArray:
         default_dtype = get_default_numpy_dtype()
         use_rep = data_config["use_rep"]
         rep_dim = data_config["rep_dim"]
+        if data_config['prob_model']=="NB_seq":
+            return np.empty((1000,4,1000), dtype=default_dtype)
         if use_rep:
             if use_rep not in adata.obsm:
                 raise ValueError(
@@ -507,6 +585,8 @@ class AnnDataset(Dataset):
                     f"cannot be found in input data!"
                 )
             xrep = np.asarray(adata.obsm[use_rep]).astype(default_dtype)
+            # print('use_rep',use_rep,xrep.shape)
+
             if xrep.shape[1] != rep_dim:
                 raise ValueError(
                     f"Input representation dimensionality {xrep.shape[1]} "
@@ -559,6 +639,7 @@ class AnnDataset(Dataset):
             xuid = adata.obs_names.to_numpy()
         else:  # NOTE: Assuming random UUIDs never collapse with anything
             self.logger.debug("Generating random xuid...")
+            print('xuid',adata)
             xuid = np.array([uuid.uuid4().hex for _ in range(adata.shape[0])])
         if len(set(xuid)) != xuid.size:
             raise ValueError("Non-unique cell ID!")
@@ -774,6 +855,9 @@ class GraphDataset(Dataset):
 
 #-------------------------------- Data loaders ---------------------------------
 
+
+
+
 class DataLoader(torch.utils.data.DataLoader):
 
     r"""
@@ -787,6 +871,18 @@ class DataLoader(torch.utils.data.DataLoader):
             dataset, GraphDataset
         ) else self._collate
         self.shuffle = kwargs["shuffle"] if "shuffle" in kwargs else False
+        # if isinstance(dataset, AnnDataset):
+        #     print('dataset',dataset.adatas)
+        #     self.seq = self.convert2sequence(dataset.adatas[1])
+        #     seq_dict={}
+        #     for i in range(len(self.seq)):
+        #         seq_dict[i]=self.seq[i][1]
+        #     #need to pad the sequence in order to have the same length
+        #     atac_seq=torch.as_tensor(self.onehot_mononuc_multi(seq_dict,1000))
+        #     print(atac_seq)
+        #     self.atac_seq=atac_seq
+            # print(dataset.adatas[1].X)
+            # dataset.adatas[1].X=atac_seq
 
     def __iter__(self) -> "DataLoader":
         if self.shuffle:
@@ -795,6 +891,14 @@ class DataLoader(torch.utils.data.DataLoader):
 
     @staticmethod
     def _collate(batch):
+        # print('batch',batch[0][0:2])
+        out=tuple(map(lambda x: torch.cat(x, dim=0), zip(*batch)))
+        # x_atac = out[0:2][1]
+        # print('collate batch',len(batch),batch)
+        # print('batch 0',len(batch[0]),batch[0][1].shape,batch[0][0].shape)
+        # for i in out:
+        #     print('data collate',i.shape)
+
         return tuple(map(lambda x: torch.cat(x, dim=0), zip(*batch)))
 
     @staticmethod
@@ -837,11 +941,13 @@ class ParallelDataLoader:
         return self
 
     def _next(self, i: int) -> List[torch.Tensor]:
+        print(i)
         try:
             return next(self.iterators[i])
         except StopIteration as e:
             if self.cycle_flags[i]:
                 self.iterators[i] = iter(self.data_loaders[i])
+                print("parallel",i)
                 return next(self.iterators[i])
             raise e
 

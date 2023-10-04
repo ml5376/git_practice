@@ -54,6 +54,7 @@ def register_prob_model(prob_model: str, encoder: type, decoder: type) -> None:
 register_prob_model("Normal", sc.VanillaDataEncoder, sc.NormalDataDecoder)
 register_prob_model("ZIN", sc.VanillaDataEncoder, sc.ZINDataDecoder)
 register_prob_model("ZILN", sc.VanillaDataEncoder, sc.ZILNDataDecoder)
+register_prob_model("NB_seq", sc.SeqDataEncoder, sc.NBDataDecoder)
 register_prob_model("NB", sc.NBDataEncoder, sc.NBDataDecoder)
 register_prob_model("ZINB", sc.NBDataEncoder, sc.ZINBDataDecoder)
 
@@ -278,10 +279,16 @@ class SCGLUETrainer(GLUETrainer):
     ) -> Mapping[str, torch.Tensor]:
         net = self.net
         x, xrep, xbch, xlbl, xdwt, xflag, eidx, ewt, esgn = data
-
+        # print('compute_loss:x',x['atac'])
         u, l = {}, {}
         for k in net.keys:
             u[k], l[k] = net.x2u[k](x[k], xrep[k], lazy_normalizer=dsc_only)
+        # print('latent u:',u['atac'])
+        # print('latent l',l['atac'])
+        # if l['atac'] is not None:
+        #     print(l['atac'].shape)
+        # print() latent shape before and after modification; check if they are the same
+        # embbeding on latent u and l to get same shape as before
         usamp = {k: u[k].rsample() for k in net.keys}
         if self.normalize_u:
             usamp = {k: F.normalize(usamp[k], dim=1) for k in net.keys}
@@ -327,7 +334,7 @@ class SCGLUETrainer(GLUETrainer):
         x_nll = {
             k: -net.u2x[k](
                 usamp[k], vsamp[getattr(net, f"{k}_idx")], xbch[k], l[k]
-            ).log_prob(x[k]).mean()
+            ,k).log_prob(x[k]).mean()
             for k in net.keys
         }
         x_kl = {
@@ -364,6 +371,7 @@ class SCGLUETrainer(GLUETrainer):
     def train_step(
             self, engine: ignite.engine.Engine, data: List[torch.Tensor]
     ) -> Mapping[str, torch.Tensor]:
+        print('train_step:',len(data))
         self.net.train()
         data = self.format_data(data)
         epoch = engine.state.epoch
@@ -488,6 +496,7 @@ class PairedSCGLUETrainer(SCGLUETrainer):
         device = self.net.device
         keys = self.net.keys
         K = len(keys)
+        # print('K',K)
         x, xrep, xbch, xlbl, xdwt, pmsk, (eidx, ewt, esgn) = \
             data[0:K], data[K:2*K], data[2*K:3*K], data[3*K:4*K], data[4*K:5*K], \
             data[5*K], data[5*K+1:]
@@ -738,12 +747,22 @@ class SCGLUEModel(Model):
             if idx[k].min() < 0:
                 raise ValueError("Not all modality features exist in the graph!")
             idx[k] = torch.as_tensor(idx[k])
+            print('encoder constructed')
+            print(data_config["prob_model"])
+
+            if k=='atac':
+                data_config["prob_model"]="NB_seq"
+                # x2u[k]=_ENCODER_MAP['NB_seq'](data_config["rep_dim"] or len(data_config["features"]), latent_dim,
+                # h_depth=h_depth, h_dim=h_dim, dropout=dropout)
+
             x2u[k] = _ENCODER_MAP[data_config["prob_model"]](
-                data_config["rep_dim"] or len(data_config["features"]), latent_dim,
-                h_depth=h_depth, h_dim=h_dim, dropout=dropout
+            data_config["rep_dim"] or len(data_config["features"]), latent_dim,
+            h_depth=h_depth, h_dim=h_dim, dropout=dropout
             )
+
             data_config["batches"] = pd.Index([]) if data_config["batches"] is None \
                 else pd.Index(data_config["batches"])
+
             u2x[k] = _DECODER_MAP[data_config["prob_model"]](
                 len(data_config["features"]),
                 n_batches=max(data_config["batches"].size, 1)
@@ -873,6 +892,7 @@ class SCGLUEModel(Model):
             reduce_lr_patience: Optional[int] = AUTO,
             wait_n_lrs: int = 1, directory: Optional[os.PathLike] = None
     ) -> None:
+        print('-------SCGlUEModel.fit------------')
         r"""
         Fit model on given datasets
 
@@ -1078,6 +1098,7 @@ class SCGLUEModel(Model):
             or shape :math:`n_{cell} \times n_{sample} \times n_{dim}`
             if ``n_sample`` is not ``None``.
         """
+        print('encode_data')
         self.net.eval()
         encoder = self.net.x2u[key]
         data = AnnDataset(
@@ -1092,6 +1113,9 @@ class SCGLUEModel(Model):
         )
         result = []
         for x, xrep, *_ in data_loader:
+            print('x',x)
+            print('xrep',xrep)
+            print('encoder')
             u = encoder(
                 x.to(self.net.device, non_blocking=True),
                 xrep.to(self.net.device, non_blocking=True),
@@ -1111,6 +1135,7 @@ class SCGLUEModel(Model):
             target_batch: Optional[np.ndarray] = None,
             batch_size: int = 128
     ) -> np.ndarray:
+        print('decode_data')
         r"""
         Decode data
 
