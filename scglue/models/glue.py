@@ -524,6 +524,7 @@ class GLUETrainer(Trainer):
         plugins
             Optional list of training plugins
         """
+        # self.atac_x=data.orig
         required_kwargs = (
             "val_split", "data_batch_size", "graph_batch_size",
             "align_burnin", "max_epochs", "random_seed"
@@ -550,7 +551,7 @@ class GLUETrainer(Trainer):
         data_train.prepare_shuffle(num_workers=config.ARRAY_SHUFFLE_NUM_WORKERS, random_seed=random_seed)
         data_val.prepare_shuffle(num_workers=config.ARRAY_SHUFFLE_NUM_WORKERS, random_seed=random_seed)
         graph.prepare_shuffle(num_workers=config.GRAPH_SHUFFLE_NUM_WORKERS, random_seed=random_seed)
-        print('data_train',len(data_train))
+        #print('data_train',len(data_train))
         train_loader = ParallelDataLoader(
             DataLoader(
                 data_train, batch_size=config.DATALOADER_FETCHES_PER_BATCH, shuffle=True,

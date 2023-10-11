@@ -107,6 +107,8 @@ class SeqDataEncoder(glue.DataEncoder):
         else:
             ptr = x
             l = self.compute_l(x)
+
+
             # ptr = self.normalize(x, l)
         for layer in range(self.h_depth):
             ptr = getattr(self, f"linear_{layer}")(ptr)
@@ -454,14 +456,14 @@ class NBDataDecoder(DataDecoder):
     ) -> D.NegativeBinomial:
         scale = F.softplus(self.scale_lin[b])
         logit_mu = scale * (u @ v.t()) + self.bias[b]
-        print('logit_mu shape',logit_mu.shape)
+        #print('logit_mu shape',logit_mu.shape)
         if k=='atac':
             l=torch.ones(l.shape[0],1)
         mu = F.softmax(logit_mu, dim=1) * l
         if k=='atac':
             mu = F.softmax(logit_mu, dim=1)
         log_theta = self.log_theta[b]
-        print('mu shape',mu.shape)
+        #print('mu shape',mu.shape)
         return D.NegativeBinomial(
             log_theta.exp(),
             logits=(mu + EPS).log() - log_theta

@@ -23,7 +23,7 @@ from ..num import normalize_edges
 from ..utils import AUTO, config, get_chained_attr, logged
 from . import sc
 from .base import Model
-from .data import AnnDataset, ArrayDataset, DataLoader, GraphDataset
+from .data import AnnDataset,AnnDataset2, ArrayDataset, DataLoader, GraphDataset
 from .glue import GLUE, GLUETrainer
 from .nn import freeze_running_stats
 
@@ -240,15 +240,20 @@ class SCGLUETrainer(GLUETrainer):
         device = self.net.device
         keys = self.net.keys
         K = len(keys)
-        x, xrep, xbch, xlbl, xdwt, (eidx, ewt, esgn) = \
-            data[0:K], data[K:2*K], data[2*K:3*K], data[3*K:4*K], data[4*K:5*K], \
-            data[5*K+1:]
+
+        x, xrep, xatac,xbch, xlbl, xdwt, (eidx, ewt, esgn) = \
+            data[0:K], data[K:2*K], data[2*K:3*K], data[3*K:4*K], data[4*K:5*K],data[5*K:6*K],data[6*K+1:]
+
         x = {
             k: x[i].to(device, non_blocking=True)
             for i, k in enumerate(keys)
         }
         xrep = {
             k: xrep[i].to(device, non_blocking=True)
+            for i, k in enumerate(keys)
+        }
+        xatac = {
+            k: xatac[i].to(device, non_blocking=True)
             for i, k in enumerate(keys)
         }
         xbch = {
@@ -272,13 +277,13 @@ class SCGLUETrainer(GLUETrainer):
         eidx = eidx.to(device, non_blocking=True)
         ewt = ewt.to(device, non_blocking=True)
         esgn = esgn.to(device, non_blocking=True)
-        return x, xrep, xbch, xlbl, xdwt, xflag, eidx, ewt, esgn
+        return x, xrep,xatac, xbch, xlbl, xdwt, xflag, eidx, ewt, esgn
 
     def compute_losses(
             self, data: DataTensors, epoch: int, dsc_only: bool = False
     ) -> Mapping[str, torch.Tensor]:
         net = self.net
-        x, xrep, xbch, xlbl, xdwt, xflag, eidx, ewt, esgn = data
+        x, xrep, xatax,xbch, xlbl, xdwt, xflag, eidx, ewt, esgn = data
         # print('compute_loss:x',x['atac'])
         u, l = {}, {}
         for k in net.keys:
@@ -330,11 +335,19 @@ class SCGLUETrainer(GLUETrainer):
         g_nll = (g_nll_pn[0] / max(n_neg, 1) + g_nll_pn[1] / max(n_pos, 1)) / avgc
         g_kl = D.kl_divergence(v, prior).sum(dim=1).mean() / vsamp.shape[0]
         g_elbo = g_nll + self.lam_kl * g_kl
-
+        # k='rna'
+        # x_nll={}
+        # x_nll[k]=-net.u2x[k](
+        #         usamp[k], vsamp[getattr(net, f"{k}_idx")], xbch[k], l[k]
+        #     ,k).log_prob(x[k]).mean()
+        # k='atac'
+        # x_nll[k] = -net.u2x[k](
+        #     usamp[k], vsamp[getattr(net, f"{k}_idx")], xbch[k], l[k]
+        #     , k).log_prob(xrep[k]).mean()
         x_nll = {
             k: -net.u2x[k](
                 usamp[k], vsamp[getattr(net, f"{k}_idx")], xbch[k], l[k]
-            ,k).log_prob(x[k]).mean()
+            ,k).log_prob(xatax[k]).mean()
             for k in net.keys
         }
         x_kl = {
@@ -371,7 +384,7 @@ class SCGLUETrainer(GLUETrainer):
     def train_step(
             self, engine: ignite.engine.Engine, data: List[torch.Tensor]
     ) -> Mapping[str, torch.Tensor]:
-        print('train_step:',len(data))
+        #print('train_step:',len(data))
         self.net.train()
         data = self.format_data(data)
         epoch = engine.state.epoch
@@ -1105,16 +1118,19 @@ class SCGLUEModel(Model):
             [adata], [self.modalities[key]],
             mode="eval", getitem_size=batch_size
         )
+
+        print('dataset',data)
         data_loader = DataLoader(
             data, batch_size=1, shuffle=False,
             num_workers=config.DATALOADER_NUM_WORKERS,
             pin_memory=config.DATALOADER_PIN_MEMORY and not config.CPU_ONLY, drop_last=False,
             persistent_workers=False
         )
+        print('dataloader',data_loader)
         result = []
         for x, xrep, *_ in data_loader:
-            print('x',x)
-            print('xrep',xrep)
+            print('x',x,x.size)
+            print('xrep',xrep,xrep.shape)
             print('encoder')
             u = encoder(
                 x.to(self.net.device, non_blocking=True),

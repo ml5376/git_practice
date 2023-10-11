@@ -502,8 +502,17 @@ def estimate_balancing_weight(
         )).todense() / n
         balancing = pd.Series(balancing, index=leiden.obs_names)
         balancing = balancing.loc[adata_.obs["leiden"]].to_numpy()
-        balancing /= balancing.sum() / balancing.size
+        print('balancing', balancing)
+        #-------change----------------------
+        # balancing /= balancing.sum() / balancing.size
+        if balancing.sum() != 0:
+            balancing /= balancing.sum() / balancing.size
+
+        else:
+            # 处理数组之和为零的情况，例如给数组赋予默认值或采取其他操作
+            pass
         adata.obs[key_added] = balancing
+
 
 
 @logged

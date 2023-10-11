@@ -78,3 +78,12 @@ glue = scglue.models.fit_SCGLUE(
     {"rna": rna, "atac": atac}, guidance_hvf,
     fit_kws={"directory": "glue"}
 )
+
+rna.obsm["X_glue"] = glue.encode_data("rna", rna)
+atac.obsm["X_glue"] = glue.encode_data("atac", atac)
+
+print('rna-embedding',rna.obsm["X_glue"].shape)
+print('atac-embedding',atac.obsm["X_glue"].shape)
+print(glue)
+
+glue.save("glue-modified.dill")
