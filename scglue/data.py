@@ -422,6 +422,7 @@ def estimate_balancing_weight(
     and :math:`n` is the number of datasets), a sparse implementation
     was used, so the scalability regarding dataset number should be good.
     """
+    print('balancing weight adata',AnnData)
     if use_batch:  # Recurse per batch
         estimate_balancing_weight.logger.info("Splitting batches...")
         adatas_per_batch = defaultdict(list)
@@ -453,6 +454,7 @@ def estimate_balancing_weight(
 
     if use_rep is None:
         raise ValueError("Missing required argument `use_rep`!")
+    print('check obsm ', [adata.obsm[use_rep]for adata in adatas])
     adatas_ = [
         AnnData(
             obs=adata.obs.copy(deep=False).assign(n=1),
@@ -500,17 +502,19 @@ def estimate_balancing_weight(
         balancing = joint_cosine.sum(axis=tuple(
             k for k in range(joint_cosine.ndim) if k != i
         )).todense() / n
+        # print('balancing0', balancing)
         balancing = pd.Series(balancing, index=leiden.obs_names)
         balancing = balancing.loc[adata_.obs["leiden"]].to_numpy()
         print('balancing', balancing)
         #-------change----------------------
-        # balancing /= balancing.sum() / balancing.size
-        if balancing.sum() != 0:
-            balancing /= balancing.sum() / balancing.size
-
-        else:
-            # 处理数组之和为零的情况，例如给数组赋予默认值或采取其他操作
-            pass
+        balancing /= balancing.sum() / balancing.size
+        # if balancing.sum() != 0:
+        #     balancing /= balancing.sum() / balancing.size
+        #     # adata.obs[key_added] = balancing
+        # else:
+        #     # 处理数组之和为零的情况，例如给数组赋予默认值或采取其他操作
+        #     pass
+        print(balancing)
         adata.obs[key_added] = balancing
 
 

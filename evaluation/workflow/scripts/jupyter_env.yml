@@ -1,4 +1,4 @@
-name: fa_base_jupyter
+name: fa_base2
 channels:
   - bioconda
   - <unknown>
@@ -434,4 +434,4 @@ dependencies:
       - webcolors==1.13
       - wget==3.2
       - wrapt==1.15.0
-prefix: /Users/meiqiliu/miniforge3/envs/fa_base_jupyter
+prefix: /Users/meiqiliu/miniforge3/envs/fa_base2

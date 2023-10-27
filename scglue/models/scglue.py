@@ -27,7 +27,7 @@ from .data import AnnDataset,AnnDataset2, ArrayDataset, DataLoader, GraphDataset
 from .glue import GLUE, GLUETrainer
 from .nn import freeze_running_stats
 
-
+# chrom_length=2000
 #---------------------------------- Utilities ----------------------------------
 
 _ENCODER_MAP: Mapping[str, type] = {}
@@ -283,7 +283,7 @@ class SCGLUETrainer(GLUETrainer):
             self, data: DataTensors, epoch: int, dsc_only: bool = False
     ) -> Mapping[str, torch.Tensor]:
         net = self.net
-        x, xrep, xatax,xbch, xlbl, xdwt, xflag, eidx, ewt, esgn = data
+        x, xrep, xatac,xbch, xlbl, xdwt, xflag, eidx, ewt, esgn = data
         # print('compute_loss:x',x['atac'])
         u, l = {}, {}
         for k in net.keys:
@@ -347,7 +347,7 @@ class SCGLUETrainer(GLUETrainer):
         x_nll = {
             k: -net.u2x[k](
                 usamp[k], vsamp[getattr(net, f"{k}_idx")], xbch[k], l[k]
-            ,k).log_prob(xatax[k]).mean()
+            ,k).log_prob(xatac[k]).mean()
             for k in net.keys
         }
         x_kl = {
@@ -731,7 +731,7 @@ class SCGLUEModel(Model):
     REDUCE_LR_PATIENCE_PRG: float = 2.0  # Effective optimization progress of reduce_lr_patience (learning rate * iterations)
 
     def __init__(
-            self, adatas: Mapping[str, AnnData],
+            self, chrom, adatas: Mapping[str, AnnData],
             vertices: List[str], latent_dim: int = 50,
             h_depth: int = 2, h_dim: int = 256,
             dropout: float = 0.2, shared_batches: bool = False,
@@ -767,11 +767,16 @@ class SCGLUEModel(Model):
                 data_config["prob_model"]="NB_seq"
                 # x2u[k]=_ENCODER_MAP['NB_seq'](data_config["rep_dim"] or len(data_config["features"]), latent_dim,
                 # h_depth=h_depth, h_dim=h_dim, dropout=dropout)
-
-            x2u[k] = _ENCODER_MAP[data_config["prob_model"]](
-            data_config["rep_dim"] or len(data_config["features"]), latent_dim,
-            h_depth=h_depth, h_dim=h_dim, dropout=dropout
-            )
+            if k=='rna':
+                x2u[k] = _ENCODER_MAP[data_config["prob_model"]](
+                data_config["rep_dim"] or len(data_config["features"]), latent_dim,
+                h_depth=h_depth, h_dim=h_dim, dropout=dropout
+                )
+            if k == 'atac':
+                x2u[k] = _ENCODER_MAP[data_config["prob_model"]](chrom,
+                    data_config["rep_dim"] or len(data_config["features"]), latent_dim,
+                    h_depth=h_depth, h_dim=h_dim, dropout=dropout
+                )
 
             data_config["batches"] = pd.Index([]) if data_config["batches"] is None \
                 else pd.Index(data_config["batches"])
@@ -1126,11 +1131,12 @@ class SCGLUEModel(Model):
             pin_memory=config.DATALOADER_PIN_MEMORY and not config.CPU_ONLY, drop_last=False,
             persistent_workers=False
         )
+
         print('dataloader',data_loader)
         result = []
         for x, xrep, *_ in data_loader:
-            print('x',x,x.size)
-            print('xrep',xrep,xrep.shape)
+            # print('x',x,x.size)
+            # print('xrep',xrep,xrep.shape)
             print('encoder')
             u = encoder(
                 x.to(self.net.device, non_blocking=True),

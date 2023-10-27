@@ -187,4 +187,4 @@ def autodevice() -> torch.device:
         return torch.device("cpu")
     autodevice.logger.info("Using GPU %d as computation device.", used_device)
     os.environ["CUDA_VISIBLE_DEVICES"] = str(used_device)
-    return torch.device("cuda")
+    return torch.device("mps")# change

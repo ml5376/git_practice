@@ -15,16 +15,39 @@ import numpy as np
 import pandas as pd
 import torch
 from pybedtools.helpers import set_bedtools_path
-
+import bindome
 from .typehint import RandomState, T
+# chrom_length=2000
 
 AUTO = "AUTO"  # Flag for using automatically determined hyperparameters
 
 
 #------------------------------ Global containers ------------------------------
-
+import statistics
 processes: Mapping[int, Mapping[int, Process]] = defaultdict(dict)  # id -> pid -> process
-
+#---------------------------------Data conversion--------------------------------
+def convert2sequence(atac):
+    # print('original atac before conversion', atac)
+    path = '/Users/meiqiliu/PycharmProjects/GLUE3/experiments/Atlas/scripts/mm10.fa'
+    seq2 = bindome.tl.get_sequences_from_bed(atac.var[['chrom', 'chromStart', 'chromEnd']].head(atac.shape[0]),
+                                             genome='mm10', uppercase=True, gen_path=path)
+    # ['chrom name': seq] format
+    # print("length of seq2:", len(seq2))
+    seq_dict = {}
+    len_dict = []
+    for i in range(len(seq2)):
+        seq_dict[i] = seq2[i][1]
+        len_dict.append(len(seq_dict[i]))
+    # change the global variable
+    global chrom_length
+    chrom_length = len(max(seq_dict.values(), key=len))
+    # chrom_length=int(statistics.median(len_dict))
+    # print('chrom length:', chrom_length)
+    # need to pad the sequence in order to have the same length
+    # atac_seq = self.onehot_mononuc_multi(seq_dict, chrom_length)
+    # print("convert sequence", atac_seq.shape)
+    # self.atac_seq = atac_seq
+    return chrom_length
 
 #-------------------------------- Meta classes ---------------------------------
 

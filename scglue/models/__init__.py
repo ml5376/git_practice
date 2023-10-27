@@ -10,11 +10,13 @@ import dill
 import networkx as nx
 import numpy as np
 import pandas as pd
+import torch.ao.quantization
 from anndata import AnnData
 
+import scglue.models
 from ..data import estimate_balancing_weight
 from ..typehint import Kws
-from ..utils import config, logged
+from ..utils import config, logged,convert2sequence
 from .base import Model
 from .dx import integration_consistency
 from .nn import autodevice
@@ -201,11 +203,16 @@ def fit_SCGLUE(
     if "directory" in pretrain_fit_kws:
         pretrain_fit_kws["directory"] = \
             os.path.join(pretrain_fit_kws["directory"], "pretrain")
+    chrom=convert2sequence(adatas['atac'])
+    pretrain = model(chrom,adatas,(graph.nodes), **pretrain_init_kws)
 
-    pretrain = model(adatas, sorted(graph.nodes), **pretrain_init_kws)
     pretrain.compile(**compile_kws)
+
     print('pretrain.fit---------------------')
+    # pretrain = load_model("/Users/meiqiliu/PycharmProjects/GLUE3/glue/pretrain/pretrain.dill")
+    # pretrain.load_state_dict("/Users/meiqiliu/PycharmProjects/GLUE3/glue/pretrain/checkpoint_631.pt")
     pretrain.fit(adatas, graph, **pretrain_fit_kws)#SCGLUEModel.fit
+
     if "directory" in pretrain_fit_kws:
         pretrain.save(os.path.join(pretrain_fit_kws["directory"], "pretrain.dill"))
 
@@ -213,6 +220,7 @@ def fit_SCGLUE(
     for k, adata in adatas.items():
         print('pretrain.encode_data')
         adata.obsm[f"X_{config.TMP_PREFIX}"] = pretrain.encode_data(k, adata)
+        # print('embedding size: ',adata.obsm[f"X_{config.TMP_PREFIX}"])
     if init_kws.get("shared_batches"):
         use_batch = set(
             adata.uns[config.ANNDATA_KEY]["use_batch"]
@@ -221,10 +229,12 @@ def fit_SCGLUE(
         use_batch = use_batch.pop() if len(use_batch) == 1 else None
     else:
         use_batch = None
+
     estimate_balancing_weight(
         *adatas.values(), use_rep=f"X_{config.TMP_PREFIX}", use_batch=use_batch,
         key_added="balancing_weight", **balance_kws
     )
+
     for adata in adatas.values():
         adata.uns[config.ANNDATA_KEY]["use_dsc_weight"] = "balancing_weight"
         del adata.obsm[f"X_{config.TMP_PREFIX}"]
@@ -235,7 +245,7 @@ def fit_SCGLUE(
         finetune_fit_kws["directory"] = \
             os.path.join(finetune_fit_kws["directory"], "fine-tune")
 
-    finetune = model(adatas, sorted(graph.nodes), **init_kws)
+    finetune = model(chrom,adatas, sorted(graph.nodes), **init_kws)
     finetune.adopt_pretrained_model(pretrain)
     finetune.compile(**compile_kws)
     fit_SCGLUE.logger.debug("Increasing random seed by 1 to prevent idential data order...")

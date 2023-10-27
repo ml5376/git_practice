@@ -54,12 +54,12 @@ print(os.getcwd())
 # guidance = nx.read_graphml("guidance2.graphml.gz")
 # print('atac.var',atac.var)
 
+# rna = ad.read_h5ad("rna-pp-seq-1014.h5ad")
+# atac = ad.read_h5ad("atac-pp-seq-1014.h5ad")
+# guidance = nx.read_graphml("guidance-seq-1014.graphml.gz")
 rna = ad.read_h5ad("rna-pp-seq.h5ad")
 atac = ad.read_h5ad("atac-pp-seq.h5ad")
 guidance = nx.read_graphml("guidance-seq.graphml.gz")
-# rna = ad.read_h5ad("rna-pp2.h5ad")
-# atac = ad.read_h5ad("atac-pp2.h5ad")
-# guidance = nx.read_graphml("guidance2.graphml.gz")
 scglue.models.configure_dataset(
     rna, "NB", use_highly_variable=True,
     use_layer="counts", use_rep="X_pca"
@@ -86,4 +86,4 @@ print('rna-embedding',rna.obsm["X_glue"].shape)
 print('atac-embedding',atac.obsm["X_glue"].shape)
 print(glue)
 
-glue.save("glue-modified.dill")
+glue.save("glue-modified1026.dill")

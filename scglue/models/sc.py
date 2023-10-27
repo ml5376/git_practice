@@ -10,11 +10,11 @@ import torch
 import torch.distributions as D
 import torch.nn.functional as F
 
+
 from ..num import EPS
 from . import glue
 from .nn import GraphConv
 from .prob import ZILN, ZIN, ZINB
-
 
 #-------------------------- Network modules for GLUE ---------------------------
 
@@ -64,34 +64,62 @@ class GraphDecoder(glue.GraphDecoder):
 
 class SeqDataEncoder(glue.DataEncoder):
     def __init__(
-            self, in_features: int, out_features: int,
-            h_depth: int = 2, h_dim: int = 256,
+            self, chrom_len,in_features: int, out_features: int,
+            h_depth: int = 1, h_dim: int = 256,
             dropout: float = 0.2
     ) -> None:
         super().__init__()
-        chrom_len=1000
+        print('chrom_length2',chrom_len)
+        print('in_features',in_features)
+
         self.h_depth = h_depth
-        ptr_dim = in_features
-        for layer in range(self.h_depth):
-            in_dim = chrom_len - (layer + 1) * 4
+        ptr_dim = 4#in_features
+        in_dim = chrom_len // 3 // 2 // 3 // 2
+        for layer in range(self.h_depth): # 1344,4 1344//3//2,h_dim
+            # in_dim = chrom_len - (layer + 1) * 4
             # setattr(self, f"linear_{layer}", torch.nn.Linear(ptr_dim, h_dim))
             setattr(self, f"linear_{layer}", torch.nn.Sequential(
-                torch.nn.Conv1d(4, 4, kernel_size=2), torch.nn.Sigmoid(),
-                torch.nn.AvgPool1d(kernel_size=2, stride=1),  # 使最后一位减一
-                torch.nn.Conv1d(4, 4, kernel_size=2), torch.nn.Sigmoid(),  # C_out change the middle
-                torch.nn.AvgPool1d(kernel_size=2, stride=1),
-            ))
+                torch.nn.Conv1d(ptr_dim, 28, kernel_size=17,stride=1,padding=17//2), torch.nn.Sigmoid(),#1344,28
+                torch.nn.MaxPool1d(kernel_size=3),#1344//3,28
+
+                torch.nn.Conv1d(28, 28, kernel_size=5,padding=5//2), torch.nn.Sigmoid(),#1344//3,28
+                torch.nn.MaxPool1d(kernel_size=2),#1344//3//2,28
+
+                # torch.nn.Conv1d(288, 288, kernel_size=5,padding=5//2), torch.nn.Sigmoid(),
+                # torch.nn.MaxPool1d(kernel_size=2),
+                #
+                # torch.nn.Conv1d(288, 288, kernel_size=5,padding=5//2), torch.nn.Sigmoid(),
+                # torch.nn.MaxPool1d(kernel_size=2),
+                #
+                # torch.nn.Conv1d(288, 288, kernel_size=5,padding=5//2), torch.nn.Sigmoid(),
+                # torch.nn.MaxPool1d(kernel_size=2),
+                #
+                # torch.nn.Conv1d(288, 288, kernel_size=5,padding=5//2), torch.nn.Sigmoid(),
+                # torch.nn.MaxPool1d(kernel_size=2),
+                #
+                # torch.nn.Conv1d(288, 288, kernel_size=5,padding=5//2), torch.nn.Sigmoid(),
+                # torch.nn.MaxPool1d(kernel_size=2),
+
+                torch.nn.Conv1d(28, h_dim, kernel_size=1),# 1344//3//2,h_dim
+                #
+                # torch.nn.Flatten(),
+                # torch.nn.Linear(7*256, h_dim)
+                ))
             setattr(self, f"act_{layer}", torch.nn.LeakyReLU(negative_slope=0.2))
-            setattr(self, f"bn_{layer}", torch.nn.BatchNorm1d(4))#replace h_dim to 4
+            setattr(self, f"bn_{layer}", torch.nn.BatchNorm1d(h_dim))#replace h_dim to 4
             setattr(self, f"dropout_{layer}", torch.nn.Dropout(p=dropout))
             ptr_dim = h_dim
-        self.loc = torch.nn.Sequential(torch.nn.Conv1d(4, 1, kernel_size=2), torch.nn.Sigmoid(),
-                torch.nn.Flatten(),torch.nn.Linear(in_dim-1, ptr_dim), torch.nn.Sigmoid(),torch.nn.Linear(ptr_dim, out_features))
-        self.std_lin = torch.nn.Sequential(torch.nn.Conv1d(4, 1, kernel_size=2), torch.nn.Sigmoid(),
-                torch.nn.Flatten(),torch.nn.Linear(in_dim-1, ptr_dim), torch.nn.Sigmoid(),torch.nn.Linear(ptr_dim, out_features))
+
+        self.loc=torch.nn.Sequential(torch.nn.Flatten(),torch.nn.Linear(in_dim*h_dim,out_features))
+        self.std_lin=torch.nn.Sequential(torch.nn.Flatten(),torch.nn.Linear(in_dim*h_dim,out_features))
+        # self.loc = torch.nn.Sequential(torch.nn.Conv1d(4, 1, kernel_size=2), torch.nn.Sigmoid(),
+        #         torch.nn.Flatten(),torch.nn.Linear(in_dim-1, ptr_dim), torch.nn.Sigmoid(),torch.nn.Linear(ptr_dim, out_features))
+        # self.std_lin = torch.nn.Sequential(torch.nn.Conv1d(4, 1, kernel_size=2), torch.nn.Sigmoid(),
+        #         torch.nn.Flatten(),torch.nn.Linear(in_dim-1, ptr_dim), torch.nn.Sigmoid(),torch.nn.Linear(ptr_dim, out_features))
     def compute_l(self, x: torch.Tensor) -> torch.Tensor:
         return x.sum(dim=1, keepdim=True)
-
+    # def set(self,chrom):
+    #     self._chrom_length=chrom
     def normalize(
             self, x: torch.Tensor, l: torch.Tensor
     ) -> torch.Tensor:
@@ -107,7 +135,6 @@ class SeqDataEncoder(glue.DataEncoder):
         else:
             ptr = x
             l = self.compute_l(x)
-
 
             # ptr = self.normalize(x, l)
         for layer in range(self.h_depth):
@@ -457,11 +484,14 @@ class NBDataDecoder(DataDecoder):
         scale = F.softplus(self.scale_lin[b])
         logit_mu = scale * (u @ v.t()) + self.bias[b]
         #print('logit_mu shape',logit_mu.shape)
-        if k=='atac':
-            l=torch.ones(l.shape[0],1)
-        mu = F.softmax(logit_mu, dim=1) * l
+        # if k=='atac':
+        #     l=torch.ones(l.shape[0],1)
+
+
         if k=='atac':
             mu = F.softmax(logit_mu, dim=1)
+        else:
+            mu = F.softmax(logit_mu, dim=1) * l
         log_theta = self.log_theta[b]
         #print('mu shape',mu.shape)
         return D.NegativeBinomial(

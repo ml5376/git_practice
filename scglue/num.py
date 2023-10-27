@@ -10,7 +10,7 @@ import scipy.sparse
 from .typehint import Array
 
 EPS = 1e-7
-
+# chrom_length=2000
 
 #------------------------------ Numeric functions ------------------------------
 
