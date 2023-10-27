@@ -11,7 +11,7 @@ def main():
     # glue=models.load_model("glue-modified1014.dill")#glue-modified1012.dill
     glue = models.load_model("/Users/meiqiliu/PycharmProjects/GLUE3_1/evaluation/workflow/scripts/glue/fine-tune/fine-tune.dill")
     # rna = ad.read_h5ad("rna-pp-seq-1014.h5ad")
-    # atac = ad.read_h5ad("atac-pp-seq-1014.h5ad")
+
     rna = ad.read_h5ad("rna-pp2.h5ad")
     atac = ad.read_h5ad("atac-pp2.h5ad")
     guidance = nx.read_graphml("guidance2.graphml.gz")
